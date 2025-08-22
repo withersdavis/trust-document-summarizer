@@ -255,35 +255,17 @@ Keep it concise and factual."""
         }
     
     def _create_citations(self, facts: List[Fact]) -> Dict:
-        """Create citations from facts"""
+        """Create citations from facts - using complete fact text without truncation"""
         citations = {}
         
         for i, fact in enumerate(facts, 1):
             cite_id = f"{i:03d}"
             
-            # Get complete fact text, ensuring it ends at a sentence boundary
-            fact_text = fact.fact
-            
-            # If fact is too long, truncate at sentence boundary
-            if len(fact_text) > 300:
-                # Try to find a sentence ending within first 300 chars
-                sentence_end = -1
-                for end_char in ['. ', '.\n', '; ', ';\n']:
-                    pos = fact_text[:300].rfind(end_char)
-                    if pos > 0:
-                        sentence_end = pos + 1
-                        break
-                
-                # If we found a sentence boundary, use it
-                if sentence_end > 0:
-                    fact_text = fact_text[:sentence_end]
-                else:
-                    # Otherwise, truncate at word boundary
-                    fact_text = fact_text[:297] + "..."
-            
+            # Use the complete fact text without any truncation
+            # Citations should be complete for proper reference
             citations[cite_id] = {
                 'page': fact.page,
-                'text': fact_text,
+                'text': fact.fact,  # Full fact text, no truncation
                 'type': fact.fact_type,
                 'confidence': fact.confidence
             }

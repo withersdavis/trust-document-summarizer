@@ -260,21 +260,33 @@ class SemanticFactExtractor:
         
         # Find sentence end (look forward for sentence ending)
         sentence_end = end
-        for i in range(end, min(len(text), end + 500)):
-            if text[i] in '.!?;':
-                sentence_end = i + 1
-                break
-        else:
-            # If no sentence ending found, look for paragraph end
-            for i in range(end, min(len(text), end + 200)):
-                if text[i] == '\n':
+        
+        # More aggressive search for sentence completion
+        for i in range(end, min(len(text), end + 800)):
+            # Check for sentence endings
+            if i < len(text) - 1:
+                # Period followed by space or newline
+                if text[i] == '.' and (text[i+1] in ' \n\t' or text[i+1].isupper()):
+                    sentence_end = i + 1
+                    break
+                # Semicolon or other endings
+                elif text[i] in ';!?' and text[i+1] in ' \n\t':
+                    sentence_end = i + 1
+                    break
+                # Double newline (paragraph break)
+                elif i < len(text) - 2 and text[i:i+2] == '\n\n':
                     sentence_end = i
                     break
         
         # Extract the complete sentence
         sentence = text[sentence_start:sentence_end].strip()
         
-        # Clean up excessive whitespace
+        # Clean up excessive whitespace but preserve some structure
+        lines = sentence.split('\n')
+        cleaned_lines = [' '.join(line.split()) for line in lines]
+        sentence = ' '.join(cleaned_lines)
+        
+        # Final cleanup to remove multiple spaces
         sentence = ' '.join(sentence.split())
         
         return sentence
