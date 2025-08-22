@@ -260,9 +260,30 @@ Keep it concise and factual."""
         
         for i, fact in enumerate(facts, 1):
             cite_id = f"{i:03d}"
+            
+            # Get complete fact text, ensuring it ends at a sentence boundary
+            fact_text = fact.fact
+            
+            # If fact is too long, truncate at sentence boundary
+            if len(fact_text) > 300:
+                # Try to find a sentence ending within first 300 chars
+                sentence_end = -1
+                for end_char in ['. ', '.\n', '; ', ';\n']:
+                    pos = fact_text[:300].rfind(end_char)
+                    if pos > 0:
+                        sentence_end = pos + 1
+                        break
+                
+                # If we found a sentence boundary, use it
+                if sentence_end > 0:
+                    fact_text = fact_text[:sentence_end]
+                else:
+                    # Otherwise, truncate at word boundary
+                    fact_text = fact_text[:297] + "..."
+            
             citations[cite_id] = {
                 'page': fact.page,
-                'text': fact.fact[:200],  # Limit citation length
+                'text': fact_text,
                 'type': fact.fact_type,
                 'confidence': fact.confidence
             }

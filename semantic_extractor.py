@@ -123,7 +123,8 @@ class SemanticFactExtractor:
         # Extract relationship facts
         for pattern, fact_type in self.relationship_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
-                fact_text = match.group(0)
+                # Get complete sentence instead of just the match
+                fact_text = self._get_complete_sentence(text, match.start(), match.end())
                 position = start_position + match.start()
                 context = self._get_context(text, match.start(), match.end())
                 
@@ -141,7 +142,8 @@ class SemanticFactExtractor:
         # Extract condition facts
         for pattern, fact_type in self.condition_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
-                fact_text = match.group(0)
+                # Get complete sentence instead of just the match
+                fact_text = self._get_complete_sentence(text, match.start(), match.end())
                 position = start_position + match.start()
                 context = self._get_context(text, match.start(), match.end())
                 
@@ -160,7 +162,8 @@ class SemanticFactExtractor:
         for fact_type, patterns in self.trust_patterns.items():
             for pattern in patterns:
                 for match in re.finditer(pattern, text, re.IGNORECASE | re.DOTALL):
-                    fact_text = match.group(0)
+                    # Get complete sentence instead of just the match
+                    fact_text = self._get_complete_sentence(text, match.start(), match.end())
                     position = start_position + match.start()
                     context = self._get_context(text, match.start(), match.end())
                     
@@ -239,6 +242,42 @@ class SemanticFactExtractor:
             context = context + '...'
         
         return context
+    
+    def _get_complete_sentence(self, text: str, start: int, end: int) -> str:
+        """Extract complete sentence containing the match"""
+        # Find sentence start (look backwards for sentence ending)
+        sentence_start = start
+        for i in range(start - 1, max(0, start - 500), -1):
+            if text[i] in '.!?;' and i + 1 < len(text) and text[i + 1] in ' \n\t':
+                sentence_start = i + 2
+                break
+        else:
+            # If no sentence ending found, look for paragraph start
+            for i in range(start - 1, max(0, start - 200), -1):
+                if text[i] == '\n':
+                    sentence_start = i + 1
+                    break
+        
+        # Find sentence end (look forward for sentence ending)
+        sentence_end = end
+        for i in range(end, min(len(text), end + 500)):
+            if text[i] in '.!?;':
+                sentence_end = i + 1
+                break
+        else:
+            # If no sentence ending found, look for paragraph end
+            for i in range(end, min(len(text), end + 200)):
+                if text[i] == '\n':
+                    sentence_end = i
+                    break
+        
+        # Extract the complete sentence
+        sentence = text[sentence_start:sentence_end].strip()
+        
+        # Clean up excessive whitespace
+        sentence = ' '.join(sentence.split())
+        
+        return sentence
     
     def _extract_provision_sentences(self, text: str) -> List[Tuple[str, int]]:
         """Extract sentences that look like legal provisions"""
