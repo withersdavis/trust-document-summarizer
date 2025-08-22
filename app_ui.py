@@ -86,11 +86,38 @@ with tab1:
                     st.write(f"**ID:** {doc['id']}")
                     st.write(f"**Path:** {doc['file_path']}")
                     st.write(f"**Size:** {doc['file_size']:,} bytes")
+                    
+                    # Add link to open file
+                    if Path(doc['file_path']).exists():
+                        with open(doc['file_path'], 'rb') as f:
+                            st.download_button(
+                                label="📄 Download PDF",
+                                data=f,
+                                file_name=doc['file_name'],
+                                mime="application/pdf",
+                                key=f"download_{doc['id']}"
+                            )
                 
                 with col2:
                     st.write(f"**Pages:** {doc['page_count'] or 'Unknown'}")
                     st.write(f"**Added:** {doc['added_date'][:10] if doc['added_date'] else 'Unknown'}")
                     st.write(f"**OCR Runs:** {doc['ocr_count']}")
+                    
+                    # Add OCR preview button
+                    if st.button(f"👁️ Preview OCR", key=f"ocr_{doc['id']}"):
+                        with st.spinner("Loading OCR text..."):
+                            try:
+                                # Get OCR text
+                                processor = PDFProcessor(use_cache=True)
+                                full_text, pages = processor.extract_text_from_pdf(doc['file_path'])
+                                
+                                # Store in session state for viewing
+                                st.session_state[f"ocr_preview_{doc['id']}"] = {
+                                    'full_text': full_text,
+                                    'pages': pages
+                                }
+                            except Exception as e:
+                                st.error(f"Failed to load OCR: {str(e)}")
                 
                 with col3:
                     st.write(f"**Results:** {doc['result_count']}")
@@ -186,6 +213,74 @@ with tab1:
                                     
                             except Exception as e:
                                 st.error(f"❌ Processing failed: {str(e)}")
+                
+                # Display OCR preview if loaded
+                if f"ocr_preview_{doc['id']}" in st.session_state:
+                    st.divider()
+                    st.subheader("📝 OCR Text Preview")
+                    
+                    ocr_data = st.session_state[f"ocr_preview_{doc['id']}"]
+                    
+                    # Add page selector
+                    page_numbers = [p['page_number'] for p in ocr_data['pages']]
+                    selected_page = st.selectbox(
+                        "Select page to view",
+                        page_numbers,
+                        key=f"page_select_{doc['id']}"
+                    )
+                    
+                    # Display page text
+                    page_data = next(p for p in ocr_data['pages'] if p['page_number'] == selected_page)
+                    
+                    # Show text stats
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Characters", len(page_data['text']))
+                    with col2:
+                        st.metric("Words", len(page_data['text'].split()))
+                    with col3:
+                        st.metric("Lines", len(page_data['text'].splitlines()))
+                    
+                    # Show raw text in a text area for inspection
+                    st.text_area(
+                        f"Page {selected_page} OCR Text (Raw)",
+                        page_data['text'],
+                        height=400,
+                        key=f"ocr_text_{doc['id']}_{selected_page}"
+                    )
+                    
+                    # Add search functionality
+                    search_term = st.text_input(
+                        "Search in OCR text",
+                        key=f"search_{doc['id']}"
+                    )
+                    
+                    if search_term:
+                        # Search across all pages
+                        matches = []
+                        for page in ocr_data['pages']:
+                            if search_term.lower() in page['text'].lower():
+                                # Find line containing the search term
+                                lines = page['text'].splitlines()
+                                for i, line in enumerate(lines):
+                                    if search_term.lower() in line.lower():
+                                        matches.append({
+                                            'page': page['page_number'],
+                                            'line': i + 1,
+                                            'text': line.strip()
+                                        })
+                        
+                        if matches:
+                            st.success(f"Found {len(matches)} matches:")
+                            for match in matches[:10]:  # Show first 10 matches
+                                st.write(f"**Page {match['page']}, Line {match['line']}:** {match['text'][:200]}...")
+                        else:
+                            st.warning("No matches found")
+                    
+                    # Add button to close preview
+                    if st.button("Close Preview", key=f"close_ocr_{doc['id']}"):
+                        del st.session_state[f"ocr_preview_{doc['id']}"]
+                        st.rerun()
     else:
         st.info("No documents in database. Upload a PDF to get started.")
     
@@ -267,9 +362,23 @@ with tab2:
                             st.write(f"**Chunks:** {metadata.get('chunks_created', 0)}")
                         st.write(f"**Sections:** {result['sections_count']}")
                     
-                    # View result button
+                    # View result button and download
                     if result['result_file'] and Path(result['result_file']).exists():
-                        if st.button(f"View Result", key=f"view_{result['id']}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            view_clicked = st.button(f"View Result", key=f"view_{result['id']}")
+                        with col2:
+                            with open(result['result_file'], 'r') as f:
+                                result_json = f.read()
+                            st.download_button(
+                                label="📥 Download JSON",
+                                data=result_json,
+                                file_name=Path(result['result_file']).name,
+                                mime="application/json",
+                                key=f"download_result_{result['id']}"
+                            )
+                        
+                        if view_clicked:
                             with open(result['result_file'], 'r') as f:
                                 result_data = json.load(f)
                             
@@ -285,12 +394,59 @@ with tab2:
                                     st.markdown(f"**{section.get('title', 'Untitled')}**")
                                     st.markdown(section.get('content', ''))
                             
-                            # Display citations
+                            # Display citations with quality indicators
                             citations = result_data.get('citations', {})
                             if citations:
                                 st.markdown("### Citations")
+                                
+                                # Add citation quality overview
+                                complete_count = 0
+                                incomplete_count = 0
+                                
                                 for cite_id, cite_data in citations.items():
-                                    st.write(f"**[{cite_id}]** Page {cite_data.get('page', '?')}: {cite_data.get('text', '')}")
+                                    text = cite_data.get('text', '')
+                                    # Check if citation appears complete
+                                    if text and text.rstrip().endswith(('.', '!', '?', ';', ')', '"')):
+                                        complete_count += 1
+                                    else:
+                                        incomplete_count += 1
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Total Citations", len(citations))
+                                with col2:
+                                    st.metric("Complete", complete_count, delta_color="normal")
+                                with col3:
+                                    st.metric("Potentially Incomplete", incomplete_count, delta_color="inverse")
+                                
+                                # Display each citation with quality indicator
+                                for cite_id, cite_data in citations.items():
+                                    text = cite_data.get('text', '')
+                                    page = cite_data.get('page', '?')
+                                    
+                                    # Check completeness
+                                    is_complete = text and text.rstrip().endswith(('.', '!', '?', ';', ')', '"'))
+                                    indicator = "✅" if is_complete else "⚠️"
+                                    
+                                    with st.expander(f"{indicator} [{cite_id}] Page {page}", expanded=False):
+                                        st.text_area(
+                                            "Citation Text",
+                                            text,
+                                            height=100,
+                                            key=f"cite_text_{result['id']}_{cite_id}"
+                                        )
+                                        
+                                        # Show metadata
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.write(f"**Type:** {cite_data.get('type', 'unknown')}")
+                                        with col2:
+                                            st.write(f"**Confidence:** {cite_data.get('confidence', 0):.2f}")
+                                        with col3:
+                                            st.write(f"**Length:** {len(text)} chars")
+                                        
+                                        if not is_complete:
+                                            st.warning(f"Citation may be incomplete (ends with: '...{text[-30:]}')")
                     else:
                         st.warning("Result file not found")
                     
