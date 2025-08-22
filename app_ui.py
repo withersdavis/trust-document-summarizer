@@ -12,6 +12,7 @@ from document_database import DocumentDatabase
 from pdf_processor import PDFProcessor
 from multi_pass_processor import MultiPassTrustProcessor, process_trust_multipass
 from chunked_processor import ChunkedDocumentProcessor, process_large_document
+from rag_processor import RAGTrustProcessor, process_trust_rag
 from ocr_cache_manager import OCRCacheManager
 
 # Page config
@@ -97,18 +98,19 @@ with tab1:
                     # Recommend processing method based on size
                     file_size_mb = doc['file_size'] / (1024 * 1024) if doc['file_size'] else 0
                     if file_size_mb > 5 or (doc['page_count'] and doc['page_count'] > 50):
-                        recommended = "Chunked (Large Docs)"
-                        st.info("💡 Large document detected")
+                        recommended = "RAG (Semantic)"
+                        st.info("💡 Large document - RAG recommended")
                     else:
-                        recommended = "Multi-pass (Standard)"
+                        recommended = "RAG (Semantic)"
+                        st.info("💡 RAG provides best quality")
                     
                     # Processing options
                     processing_method = st.selectbox(
                         "Processing method",
-                        ["Multi-pass (Standard)", "Chunked (Large Docs)"],
-                        index=0 if recommended == "Multi-pass (Standard)" else 1,
+                        ["RAG (Semantic)", "Multi-pass (Standard)", "Chunked (Large Docs)"],
+                        index=0,  # Default to RAG
                         key=f"method_{doc['id']}",
-                        help="Use Chunked for documents > 50 pages or when standard processing fails"
+                        help="RAG: Best quality with semantic understanding | Multi-pass: Traditional approach | Chunked: For very large documents"
                     )
                     
                     # Process button
@@ -124,7 +126,25 @@ with tab1:
                                     output_dir.mkdir(exist_ok=True)
                                     
                                     # Generate output path based on method
-                                    if "Chunked" in processing_method:
+                                    if "RAG" in processing_method:
+                                        # Process using RAG method
+                                        result = process_trust_rag(
+                                            doc['file_path'], 
+                                            str(output_dir)
+                                        )
+                                        
+                                        if result.success:
+                                            result_data = result.summary
+                                            # Find the generated file (RAG adds timestamp)
+                                            pattern = Path(doc['file_path']).stem + "_rag_*.json"
+                                            result_files = list(output_dir.glob(pattern))
+                                            if result_files:
+                                                result_path = result_files[-1]  # Get most recent
+                                            else:
+                                                result_path = output_dir / (Path(doc['file_path']).stem + "_rag.json")
+                                        else:
+                                            raise Exception(f"RAG processing failed: {result.error_message}")
+                                    elif "Chunked" in processing_method:
                                         result_filename = Path(doc['file_path']).stem + "_chunked.json"
                                         result_path = output_dir / result_filename
                                         
@@ -146,10 +166,12 @@ with tab1:
                                     # Add to database
                                     metadata = {
                                         'citations_count': len(result_data.get('citations', {})),
-                                        'placeholders_count': 0,  # Multi-pass should have 0
+                                        'placeholders_count': 0,  # RAG and Multi-pass should have 0
                                         'sections_count': len(result_data.get('summary', {}).get('sections', [])),
                                         'status': 'completed',
-                                        'processing_method': result_data.get('meta', {}).get('processing_method', 'multi_pass')
+                                        'processing_method': result_data.get('meta', {}).get('processing_method', 'unknown'),
+                                        'facts_extracted': result_data.get('meta', {}).get('total_facts', 0),
+                                        'chunks_created': result_data.get('meta', {}).get('chunks', 0)
                                     }
                                     
                                     st.session_state.db.add_processing_result(
@@ -239,7 +261,10 @@ with tab2:
                     with col2:
                         metadata = json.loads(result['metadata']) if result['metadata'] else {}
                         st.write(f"**Citations:** {result['citations_count']}")
-                        st.write(f"**Placeholders:** {result['placeholders_count']}")
+                        if metadata.get('facts_extracted'):
+                            st.write(f"**Facts Extracted:** {metadata.get('facts_extracted', 0)}")
+                        if metadata.get('chunks_created'):
+                            st.write(f"**Chunks:** {metadata.get('chunks_created', 0)}")
                         st.write(f"**Sections:** {result['sections_count']}")
                     
                     # View result button
