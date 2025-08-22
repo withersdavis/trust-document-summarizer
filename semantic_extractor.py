@@ -68,6 +68,10 @@ class SemanticFactExtractor:
             (r'(?:grantor|settlor)\s+(?:is|was)\s+(\w+)', 'grantor_identification'),
             (r'(\w+)\s+(?:shall|may|is authorized to)\s+(.+)', 'authority_grant'),
             (r'upon\s+the\s+death\s+of\s+(\w+)', 'death_trigger'),
+            # Better patterns for extracting key parties
+            (r'between[,\s]+I,\s+([^,]+)[,\s]+and\s+([^,]+)[,\s]+the\s+(?:initial\s+)?trustee', 'trust_parties'),
+            (r'I,\s+([^,]+),\s+(?:as\s+)?(?:grantor|settlor|creator)', 'grantor_identification'),
+            (r'([^,]+),\s+the\s+(?:initial\s+)?trustee', 'trustee_appointment'),
         ]
         
         # Condition patterns
@@ -83,6 +87,9 @@ class SemanticFactExtractor:
             'trust_creation': [
                 r'(?:trust|agreement)\s+(?:dated|made|executed)\s+(?:on\s+)?(.+?)(?:\.|,)',
                 r'(?:established|created)\s+(?:on\s+)?(.+?)(?:\.|,)',
+                r'This\s+(.+?Trust)\s+Agreement\s+is\s+made',  # Captures "This [Trust Name] Agreement is made"
+                r'(?:name|named|known as)\s+(?:this trust |the |this )?(.+?(?:Trust|TRUST))',  # Captures trust names
+                r'The\s+(.+?(?:Trust|TRUST))\s+(?:Agreement|Document)',  # The [Trust Name] Agreement
             ],
             'distribution': [
                 r'(?:distribute|pay)\s+(.+?)\s+to\s+(.+?)(?:\.|,)',

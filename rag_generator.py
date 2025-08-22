@@ -202,38 +202,42 @@ Keep it concise and factual."""
         # Retrieve relevant facts
         section_config = self.section_queries[section_type]
         
-        # Search for relevant facts
-        search_results = self.vector_store.semantic_search(
-            section_config['query'],
-            top_k=section_config['top_k']
-        )
-        
-        # Filter by categories
-        relevant_facts = []
-        seen_facts = set()
-        
-        for result in search_results:
-            fact_text = result['metadata'].get('fact_text', '')
-            if fact_text and fact_text not in seen_facts:
-                # Reconstruct fact from metadata
-                fact = Fact(
-                    fact=fact_text,
-                    page=result['metadata'].get('page', 1),
-                    char_position=result['metadata'].get('char_position', 0),
-                    fact_type=result['metadata'].get('fact_type', ''),
-                    confidence=result['metadata'].get('confidence', 0.5),
-                    entities=json.loads(result['metadata'].get('entities', '[]')),
-                    context=result.get('text', '')
-                )
-                relevant_facts.append(fact)
-                seen_facts.add(fact_text)
-        
-        # Also get facts by category
-        category_facts = self.categorizer.filter_facts_by_section(all_facts, section_type)
-        for fact in category_facts[:10]:
-            if fact.fact not in seen_facts:
-                relevant_facts.append(fact)
-                seen_facts.add(fact.fact)
+        # For essential info, prioritize facts with key patterns
+        if section_type == 'essential_info':
+            relevant_facts = self._get_essential_facts(all_facts)
+        else:
+            # Search for relevant facts
+            search_results = self.vector_store.semantic_search(
+                section_config['query'],
+                top_k=section_config['top_k']
+            )
+            
+            # Filter by categories
+            relevant_facts = []
+            seen_facts = set()
+            
+            for result in search_results:
+                fact_text = result['metadata'].get('fact_text', '')
+                if fact_text and fact_text not in seen_facts:
+                    # Reconstruct fact from metadata
+                    fact = Fact(
+                        fact=fact_text,
+                        page=result['metadata'].get('page', 1),
+                        char_position=result['metadata'].get('char_position', 0),
+                        fact_type=result['metadata'].get('fact_type', ''),
+                        confidence=result['metadata'].get('confidence', 0.5),
+                        entities=json.loads(result['metadata'].get('entities', '[]')),
+                        context=result.get('text', '')
+                    )
+                    relevant_facts.append(fact)
+                    seen_facts.add(fact_text)
+            
+            # Also get facts by category
+            category_facts = self.categorizer.filter_facts_by_section(all_facts, section_type)
+            for fact in category_facts[:10]:
+                if fact.fact not in seen_facts:
+                    relevant_facts.append(fact)
+                    seen_facts.add(fact.fact)
         
         # Generate citations for facts
         citations = self._create_citations(relevant_facts[:15])  # Limit citations
@@ -313,6 +317,55 @@ Include citation references in the format {{{{cite:XXX}}}} where appropriate.
         except:
             # Fallback with basic content
             return f"This section contains information about {section_type.replace('_', ' ')}."
+    
+    def _get_essential_facts(self, all_facts: List[Fact]) -> List[Fact]:
+        """Get essential facts with priority on trust name, date, parties"""
+        essential_facts = []
+        seen_facts = set()
+        
+        # Priority 1: Trust creation facts (name, date)
+        for fact in all_facts:
+            if fact.fact_type == 'trust_creation':
+                # Check if it contains trust name patterns
+                if 'trust' in fact.fact.lower() and ('name' in fact.fact.lower() or 
+                    'irrevocable' in fact.fact.lower() or 'revocable' in fact.fact.lower() or
+                    any(year in fact.fact for year in ['2006', '1998', '1990', '1987'])):
+                    if fact.fact not in seen_facts:
+                        essential_facts.append(fact)
+                        seen_facts.add(fact.fact)
+        
+        # Priority 2: Grantor/Settlor identification
+        for fact in all_facts:
+            if fact.fact_type in ['grantor_identification', 'trust_parties']:
+                if fact.fact not in seen_facts:
+                    essential_facts.append(fact)
+                    seen_facts.add(fact.fact)
+        
+        # Priority 3: Trustee appointment
+        for fact in all_facts:
+            if fact.fact_type == 'trustee_appointment':
+                if 'initial' in fact.fact.lower() or 'trustee' in fact.fact.lower():
+                    if fact.fact not in seen_facts:
+                        essential_facts.append(fact)
+                        seen_facts.add(fact.fact)
+        
+        # Priority 4: Beneficiary designation
+        for fact in all_facts:
+            if fact.fact_type == 'beneficiary_designation':
+                if fact.fact not in seen_facts:
+                    essential_facts.append(fact)
+                    seen_facts.add(fact.fact)
+        
+        # If we don't have enough facts, add some from early pages
+        if len(essential_facts) < 10:
+            for fact in all_facts:
+                if fact.page <= 3 and fact.fact not in seen_facts:
+                    essential_facts.append(fact)
+                    seen_facts.add(fact.fact)
+                    if len(essential_facts) >= 15:
+                        break
+        
+        return essential_facts[:15]
     
     def _get_section_title(self, section_type: str) -> str:
         """Get title for section type"""
